@@ -25,8 +25,8 @@ with pm2 and checks `http://127.0.0.1:8080/api/health`. If the new version does 
    SUPER_ADMIN_PASSWORD=...                       # 8+ characters, only used on the very first start
    ```
    Remove the two `SUPER_ADMIN_*` lines after the first start.
-3. **pm2.** Copy `deploy/ecosystem.config.cjs` to `/opt/eshop-backend/`, remove any old secrets from the previous one, then
-   `pm2 start ecosystem.config.cjs && pm2 save && pm2 startup`.
+3. **pm2.** Replace `/opt/eshop-backend/ecosystem.config.cjs` with `deploy/ecosystem.config.cjs` (it holds no secrets; the app reads
+   `.env`). Each deploy deletes and recreates the pm2 process from that file. Run `pm2 startup` once so it survives a reboot.
 4. **GitHub secrets** (repository Settings, Environments, `production`): `SERVER_HOST`, `SERVER_USER`, `SERVER_SSH_KEY`,
    optional `SERVER_SSH_PORT`. Use a deploy key made only for this: `ssh-keygen -t ed25519 -f deploy_key -N ""`, put
    `deploy_key.pub` in the server user's `~/.ssh/authorized_keys` and the private file in `SERVER_SSH_KEY`.
