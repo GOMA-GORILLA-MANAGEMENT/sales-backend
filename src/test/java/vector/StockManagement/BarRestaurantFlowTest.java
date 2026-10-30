@@ -67,6 +67,8 @@ class BarRestaurantFlowTest {
 
     @Test @Order(1)
     void superAdminOnboardsTwoRestaurantsAndCannotSeeTheirData() throws Exception {
+        // The deploy pipeline checks this address without signing in.
+        assertEquals("UP", GET("/api/health", null, 200).get("status").asText());
         admin = login("root@sales.test", "RootPass123");
         JsonNode a = POST("/api/admin/restaurants", admin, Map.of("businessName", "Gorilla Bar", "outletName", "Gorilla Main",
                 "outletType", "BAR", "ownerFirstName", "Ada", "ownerLastName", "Owner", "ownerEmail", "ada@gorilla.test"), 201);
