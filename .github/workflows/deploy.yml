@@ -1,0 +1,114 @@
+name: CI and Deploy Backend
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - ".gitignore"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Block tracked secret files
+        run: |
+          set -e
+          if git ls-files | rg '\.env$|\.pem$|id_rsa|\.key$'; then
+            echo "Secret files must not be committed"
+            exit 1
+          fi
+          echo "No secret files tracked"
+
+  build:
+    name: Build JAR
+    needs: security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+          cache: "maven"
+
+      - name: Build with Maven
+        run: mvn -B clean package -DskipTests
+
+      - name: Upload JAR artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: target/StockManagement-0.0.1-SNAPSHOT.jar
+          retention-days: 3
+
+  deploy:
+    name: Deploy to api.sales.rw
+    needs: build
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Download JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: artifacts
+
+      - name: Upload JAR to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_SSH_PORT || 22 }}
+          source: "artifacts/StockManagement-0.0.1-SNAPSHOT.jar"
+          target: "/opt/eshop-backend/target"
+          strip_components: 1
+
+      - name: Restart backend with PM2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_SSH_PORT || 22 }}
+          script: |
+            set -e
+            APP_JAR="/opt/eshop-backend/target/StockManagement-0.0.1-SNAPSHOT.jar"
+            test -f "$APP_JAR"
+
+            cd /opt/eshop-backend
+            pm2 restart eshop-backend 2>/dev/null || pm2 start ecosystem.config.cjs
+            pm2 save
+
+            echo "Waiting for Spring Boot to start..."
+            for i in $(seq 1 24); do
+              code=$(curl -sS -m 5 -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/products || true)
+              echo "attempt $i: HTTP $code"
+              if [ "$code" = "200" ]; then
+                echo "Backend healthy on port 8080"
+                echo "Backend deployed to https://api.sales.rw"
+                exit 0
+              fi
+              sleep 5
+            done
+
+            echo "Backend failed to become healthy within 120s"
+            pm2 logs eshop-backend --lines 40 --nostream || true
+            exit 1

@@ -1,0 +1,35 @@
+Start thinking on how users will register. I mean how we will identify their roles, tenants ...  DONE
+start also thinking of @Transactional stuff
+i saw the approach of making Request models that handle creation of multiple objects not feasible. Instead I should apply APIs like createDistributorFromWareHouse instead of making a separate models of CreateWareHouseRequest which involve many fields. I will implement that later.
+
+
+                                                                    KEY POINTS
+  On Distributor dashboard , show chart / graph with distributors' info like revenue and amafaranga batari bishyura
+  Each product should have . Implement things like "View" buttons where you see all details of the product including size  and code(you forgot to put on size and code stuff)
+  A new order is created and then different products are added to that order, which means one order can have many products added
+  Change the other list that displays the orders to be displaying the order date, order cost , order code, status. Add in a button of view details,
+
+  Price manangement: A product has a price from date A to B . And then this can be updated to a new price effective from then. And the two prices history should be kept independantly  , and remain applicable to specific orders(nyine make sure you ko aho uri kugaragaza price ya products on Sales manager, ugomba gutanga form of updating the price(remember ko hari two types of prices...Warehouse price and Retail price))
+  .
+  .
+  .
+  aad in the form for handling prices ---- sales manager
+
+  in registering the products , store manager is the only one who can set units
+
+
+
+                                                                     WHAT WE NEED
+
+  Then there is a good progress and I wish by Friday we have a system with Admin, Sales Manager(register product , set  and update prices).
+  Store Manager(Record quantity of a product).
+  Distributor and Accountant implemented and integrated and Distributor can place an order. Can we commit that at least
+
+
+
+
+                                                        WHAT I THINK WE SHOULD DO TO AVOID VULNERABILITIES IN PRODUCTION
+  Removing all Logs, Make sure all Response Entity messages that provide error details do not expose some details like e.getMessage() in AuthControllers.
+  Encrypting all ids, e.g product ids , order ids etc.
+
+  i am using postgresql, and i want to trunctate all tables in my database. But I want two things to remain which is a user with role Role.SUPER_ADMIN and also  a tenant with id 2. Super admin is a user with id 2
