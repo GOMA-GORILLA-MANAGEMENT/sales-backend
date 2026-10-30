@@ -103,7 +103,9 @@ jobs:
             if [ -f "$JAR" ]; then cp "$JAR" releases/previous.jar; fi
             mv "$NEW" "$JAR"
 
-            pm2 restart eshop-backend --update-env 2>/dev/null || pm2 start ecosystem.config.cjs
+            # Always start from ecosystem.config.cjs, so settings left in an old pm2 process can never be reused.
+            pm2 delete eshop-backend 2>/dev/null || true
+            pm2 start ecosystem.config.cjs
             pm2 save
 
             echo "Waiting for the API to answer..."
@@ -121,6 +123,7 @@ jobs:
             pm2 logs eshop-backend --lines 60 --nostream || true
             if [ -f releases/previous.jar ]; then
               cp releases/previous.jar "$JAR"
-              pm2 restart eshop-backend --update-env || true
+              pm2 delete eshop-backend 2>/dev/null || true
+              pm2 start ecosystem.config.cjs || true
             fi
             exit 1
