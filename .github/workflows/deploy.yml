@@ -10,46 +10,48 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# A deploy that is already running is never cancelled halfway.
 concurrency:
   group: backend-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
 
 jobs:
   security:
     name: Security scan
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Block tracked secret files
         run: |
-          set -e
-          if git ls-files | rg '\.env$|\.pem$|id_rsa|\.key$'; then
-            echo "Secret files must not be committed"
+          if git ls-files | grep -E '(^|/)\.env$|(^|/)\.env\.local$|\.pem$|id_rsa|\.key$|\.tar\.gz$|\.log$'; then
+            echo "Secret or build files must not be committed"
             exit 1
           fi
           echo "No secret files tracked"
 
-  build:
-    name: Build JAR
+  test-and-build:
+    name: Test and build JAR
     needs: security
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
-          distribution: "temurin"
+          distribution: temurin
           java-version: "21"
-          cache: "maven"
+          cache: maven
 
-      - name: Build with Maven
-        run: mvn -B clean package -DskipTests
+      # Runs the automated tests (tenant isolation, stock, orders, debts, audit) and then builds the JAR.
+      - name: Test and package
+        run: mvn -B verify
 
-      - name: Upload JAR artifact
+      - name: Upload JAR
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
@@ -59,7 +61,7 @@ jobs:
 
   deploy:
     name: Deploy to api.sales.rw
-    needs: build
+    needs: test-and-build
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     environment: production
@@ -78,10 +80,10 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT || 22 }}
           source: "artifacts/StockManagement-0.0.1-SNAPSHOT.jar"
-          target: "/opt/eshop-backend/target"
+          target: "/opt/eshop-backend/incoming"
           strip_components: 1
 
-      - name: Restart backend with PM2
+      - name: Switch to the new version, with rollback
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -89,26 +91,36 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT || 22 }}
           script: |
-            set -e
-            APP_JAR="/opt/eshop-backend/target/StockManagement-0.0.1-SNAPSHOT.jar"
-            test -f "$APP_JAR"
-
+            set -euo pipefail
             cd /opt/eshop-backend
-            pm2 restart eshop-backend 2>/dev/null || pm2 start ecosystem.config.cjs
+            JAR=target/StockManagement-0.0.1-SNAPSHOT.jar
+            NEW=incoming/StockManagement-0.0.1-SNAPSHOT.jar
+
+            test -s "$NEW" || { echo "The new JAR did not arrive"; exit 1; }
+            test -f .env || { echo "Missing /opt/eshop-backend/.env (database, JWT key, mail). See DEPLOY.md"; exit 1; }
+
+            mkdir -p target releases
+            if [ -f "$JAR" ]; then cp "$JAR" releases/previous.jar; fi
+            mv "$NEW" "$JAR"
+
+            pm2 restart eshop-backend --update-env 2>/dev/null || pm2 start ecosystem.config.cjs
             pm2 save
 
-            echo "Waiting for Spring Boot to start..."
-            for i in $(seq 1 24); do
-              code=$(curl -sS -m 5 -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/products || true)
+            echo "Waiting for the API to answer..."
+            for i in $(seq 1 30); do
+              code=$(curl -sS -m 5 -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/health || true)
               echo "attempt $i: HTTP $code"
               if [ "$code" = "200" ]; then
-                echo "Backend healthy on port 8080"
-                echo "Backend deployed to https://api.sales.rw"
+                echo "Backend is healthy: https://api.sales.rw"
                 exit 0
               fi
               sleep 5
             done
 
-            echo "Backend failed to become healthy within 120s"
-            pm2 logs eshop-backend --lines 40 --nostream || true
+            echo "The new version did not start. Showing its log and going back to the previous version."
+            pm2 logs eshop-backend --lines 60 --nostream || true
+            if [ -f releases/previous.jar ]; then
+              cp releases/previous.jar "$JAR"
+              pm2 restart eshop-backend --update-env || true
+            fi
             exit 1
