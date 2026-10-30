@@ -30,15 +30,13 @@ build/
 !**/src/test/**/build/
 
 ### VS Code ###
-.vscode/
-.env
 backend.tar.gz
 *.tar.gz
 
 # Secrets and local files: never commit
-.env
-.env.*
 !.env.example
 *.log
 *.tar.gz
 *.gnmap
+config.bat
+node_modules

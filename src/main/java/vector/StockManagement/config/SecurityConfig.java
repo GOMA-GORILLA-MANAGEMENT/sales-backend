@@ -38,6 +38,7 @@ public class SecurityConfig {
     private String allowedOrigins;
 
     private static final String[] PUBLIC = {
+            "/api/health",
             "/api/auth/login",
             "/api/auth/refresh-token",
             "/api/auth/forgot-password",
